@@ -1,0 +1,35 @@
+name: Bump Version in DESCRIPTION
+
+on:
+  push:
+    branches:
+      - test2
+
+jobs:
+  bump-version:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Bump Version Number
+        run: |
+          # 1. Extract current version
+          CURRENT_VERSION=$(grep -i "^Version:" DESCRIPTION | awk '{print $2}')
+          
+          # 2. Validate format (e.g., 0.17.0 or 0.17.0.9000)
+          if [[ ! "$CURRENT_VERSION" =~ ^[0-9]+(\.[0-9]+)+$ ]]; then
+            echo "❌ Error: Invalid version format in DESCRIPTION: '$CURRENT_VERSION'"
+            exit 1
+          fi
+          
+          # 3. Split, increment the last digit, and stitch back together
+          IFS='.' read -r -a VERSION_PARTS <<< "$CURRENT_VERSION"
+          LAST_INDEX=$((${#VERSION_PARTS[@]} - 1))
+          VERSION_PARTS[$LAST_INDEX]=$((VERSION_PARTS[$LAST_INDEX] + 1))
+          NEW_VERSION=$(IFS='.'; echo "${VERSION_PARTS[*]}")
+          
+          # 4. Replace the old version in the DESCRIPTION file
+          sed -i "s/^Version: [0-9.]\+/Version: $NEW_VERSION/i" DESCRIPTION
+          
+          echo "✅ Successfully bumped version from $CURRENT_VERSION to $NEW_VERSION"
