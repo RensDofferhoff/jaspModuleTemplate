@@ -1,58 +1,70 @@
-name: Auto-bump Version in PR
+name: Auto-bump Version on Merge
 
-# Triggers when a PR is opened, or when new commits are pushed to the PR branch
+# This triggers ONLY when code is pushed directly to master 
+# (which includes when a Pull Request is merged into it).
 on:
-  pull_request:
-    types: [opened, synchronize]
+  push:
+    branches:
+      - master  # If your default branch is 'main', change this to 'main'
 
 jobs:
-  bump-version-pr:
+  bump-version:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # Required to push the commit back to the PR branch
+      contents: write # Required so the bot can push the new commit to your repo
     steps:
-      - name: Checkout PR branch
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          # Crucial: Check out the actual PR branch, not the merge commit, 
-          # so we can push changes back to it.
-          ref: ${{ github.head_ref }}
           fetch-depth: 0
 
-      - name: Check and Bump Version
+      - name: Calculate and Update Version
         run: |
-          # 1. Get the current version on the target branch (e.g., main)
-          BASE_VERSION=$(git show origin/${{ github.base_ref }}:DESCRIPTION 2>/dev/null | grep -i "^Version:" | awk '{print $2}')
+          # 1. Extract current version from the DESCRIPTION file
+          CURRENT_VERSION=$(grep -i "^Version:" DESCRIPTION | awk '{print $2}')
           
-          # 2. Get the current version in the PR branch
-          PR_VERSION=$(grep -i "^Version:" DESCRIPTION | awk '{print $2}')
+          # SECURITY CHECK: Ensure it strictly matches a version number format (e.g., 0.17.0 or 0.17.0.9000)
+          if [[ ! "$CURRENT_VERSION" =~ ^[0-9]+(\.[0-9]+)+$ ]]; then
+            echo "❌ Error: Invalid version format in DESCRIPTION: '$CURRENT_VERSION'"
+            exit 1
+          fi
           
-          echo "Base branch version: $BASE_VERSION"
-          echo "PR branch version:   $PR_VERSION"
+          # 2. Split the version string by periods into an array
+          IFS='.' read -r -a VERSION_PARTS <<< "$CURRENT_VERSION"
           
-          # 3. If the PR version is exactly the same as the Base version, bump it
-          if [ "$PR_VERSION" == "$BASE_VERSION" ]; then
-            echo "Version has not been bumped yet. Bumping now..."
-            
-            # Split, increment, and stitch back together
-            IFS='.' read -r -a VERSION_PARTS <<< "$BASE_VERSION"
-            LAST_INDEX=$((${#VERSION_PARTS[@]} - 1))
-            VERSION_PARTS[$LAST_INDEX]=$((VERSION_PARTS[$LAST_INDEX] + 1))
-            NEW_VERSION=$(IFS='.'; echo "${VERSION_PARTS[*]}")
-            
-            # Replace in file
-            sed -i "s/^Version: [0-9.]\+/Version: $NEW_VERSION/i" DESCRIPTION
-            
-            # Commit and push back to the PR
-            git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git config --local user.name "github-actions[bot]"
-            git add DESCRIPTION
-            git commit -m "chore: auto-bump version to $NEW_VERSION"
+          # 3. Increment the very last number by 1
+          LAST_INDEX=$((${#VERSION_PARTS[@]} - 1))
+          VERSION_PARTS[$LAST_INDEX]=$((VERSION_PARTS[$LAST_INDEX] + 1))
+          
+          # 4. Stitch the version string back together
+          NEW_VERSION=$(IFS='.'; echo "${VERSION_PARTS[*]}")
+          
+          echo "Bumping version from $CURRENT_VERSION to $NEW_VERSION"
+          
+          # 5. Safely replace the old version with the new version in the file
+          sed -i "s/^Version: [0-9.]\+/Version: $NEW_VERSION/i" DESCRIPTION
+          
+          # 6. Securely pass the new version to the next step for the commit message
+          cat <<EOF >> "$GITHUB_ENV"
+          NEW_VERSION=$NEW_VERSION
+          EOF
+
+      - name: Commit and Push
+        run: |
+          # Configure Git to act as the official GitHub Actions bot
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          
+          # Stage the changed file
+          git add DESCRIPTION
+          
+          # Check if there are actually changes to commit (prevents errors if version didn't change)
+          if ! git diff-index --quiet HEAD; then
+            # The [skip ci] flag is CRITICAL. It tells GitHub NOT to trigger 
+            # another workflow run from this automated commit, preventing infinite loops.
+            git commit -m "chore: auto-bump version to ${{ env.NEW_VERSION }} [skip ci]"
             git push
-            
-            echo "✅ Successfully pushed bumped version to PR."
+            echo "✅ Successfully bumped version and pushed to master."
           else
-            # If the versions differ, the user either already bumped it manually,
-            # or it's a major/minor version bump we shouldn't overwrite.
-            echo "✅ PR version ($PR_VERSION) differs from base ($BASE_VERSION). No action needed."
+            echo "No changes needed."
           fi
