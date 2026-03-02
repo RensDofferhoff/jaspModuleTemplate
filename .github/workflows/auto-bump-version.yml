@@ -1,35 +1,58 @@
-name: Bump Version in DESCRIPTION
+name: Auto-bump Version in PR
 
+# Triggers when a PR is opened, or when new commits are pushed to the PR branch
 on:
-  push:
-    branches:
-      - test2
+  pull_request:
+    types: [opened, synchronize]
 
 jobs:
-  bump-version:
+  bump-version-pr:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # Required to push the commit back to the PR branch
     steps:
-      - name: Checkout repository
+      - name: Checkout PR branch
         uses: actions/checkout@v4
+        with:
+          # Crucial: Check out the actual PR branch, not the merge commit, 
+          # so we can push changes back to it.
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
 
-      - name: Bump Version Number
+      - name: Check and Bump Version
         run: |
-          # 1. Extract current version
-          CURRENT_VERSION=$(grep -i "^Version:" DESCRIPTION | awk '{print $2}')
+          # 1. Get the current version on the target branch (e.g., main)
+          BASE_VERSION=$(git show origin/${{ github.base_ref }}:DESCRIPTION 2>/dev/null | grep -i "^Version:" | awk '{print $2}')
           
-          # 2. Validate format (e.g., 0.17.0 or 0.17.0.9000)
-          if [[ ! "$CURRENT_VERSION" =~ ^[0-9]+(\.[0-9]+)+$ ]]; then
-            echo "❌ Error: Invalid version format in DESCRIPTION: '$CURRENT_VERSION'"
-            exit 1
+          # 2. Get the current version in the PR branch
+          PR_VERSION=$(grep -i "^Version:" DESCRIPTION | awk '{print $2}')
+          
+          echo "Base branch version: $BASE_VERSION"
+          echo "PR branch version:   $PR_VERSION"
+          
+          # 3. If the PR version is exactly the same as the Base version, bump it
+          if [ "$PR_VERSION" == "$BASE_VERSION" ]; then
+            echo "Version has not been bumped yet. Bumping now..."
+            
+            # Split, increment, and stitch back together
+            IFS='.' read -r -a VERSION_PARTS <<< "$BASE_VERSION"
+            LAST_INDEX=$((${#VERSION_PARTS[@]} - 1))
+            VERSION_PARTS[$LAST_INDEX]=$((VERSION_PARTS[$LAST_INDEX] + 1))
+            NEW_VERSION=$(IFS='.'; echo "${VERSION_PARTS[*]}")
+            
+            # Replace in file
+            sed -i "s/^Version: [0-9.]\+/Version: $NEW_VERSION/i" DESCRIPTION
+            
+            # Commit and push back to the PR
+            git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git config --local user.name "github-actions[bot]"
+            git add DESCRIPTION
+            git commit -m "chore: auto-bump version to $NEW_VERSION"
+            git push
+            
+            echo "✅ Successfully pushed bumped version to PR."
+          else
+            # If the versions differ, the user either already bumped it manually,
+            # or it's a major/minor version bump we shouldn't overwrite.
+            echo "✅ PR version ($PR_VERSION) differs from base ($BASE_VERSION). No action needed."
           fi
-          
-          # 3. Split, increment the last digit, and stitch back together
-          IFS='.' read -r -a VERSION_PARTS <<< "$CURRENT_VERSION"
-          LAST_INDEX=$((${#VERSION_PARTS[@]} - 1))
-          VERSION_PARTS[$LAST_INDEX]=$((VERSION_PARTS[$LAST_INDEX] + 1))
-          NEW_VERSION=$(IFS='.'; echo "${VERSION_PARTS[*]}")
-          
-          # 4. Replace the old version in the DESCRIPTION file
-          sed -i "s/^Version: [0-9.]\+/Version: $NEW_VERSION/i" DESCRIPTION
-          
-          echo "✅ Successfully bumped version from $CURRENT_VERSION to $NEW_VERSION"
