@@ -7,7 +7,7 @@ on:
 
 jobs:
   call-bump-workflow:
-    uses: jasp-stats/jasp-actions/.github/workflows/auto-bump.yml@v1
+    uses: jasp-stats/jasp-actions/.github/workflows/auto-bump-version.yml@v1
     secrets:
       token_to_use: ${{ secrets.BUMP_TOKEN }}
     permissions:
