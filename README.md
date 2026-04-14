@@ -1,4 +1,4 @@
-# jaspModuleTemplate
+# jaspModuleTemplate 
 
 This template repository contains example functionality, which makes it an excellent starting point for developing a new JASP module.
 It contains the necessary files and structure, plus a numbers of examples to get started and to understand JASP's internals.
